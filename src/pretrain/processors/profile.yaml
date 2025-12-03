@@ -1,0 +1,12 @@
+entrypoint: chmod 777 ./train.sh && sh ./train.sh
+environment:
+  image: docker.1ms.run/determinedai/pytorch-ngc:0.38.1
+max_restarts: 0
+name: svct_fbpconvnet_medium
+resources:
+  resource_pool: RTX4090
+searcher:
+  max_length:
+    batches: 1
+  metric: test_acc
+  name: single

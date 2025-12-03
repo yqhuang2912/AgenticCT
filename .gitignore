@@ -1,0 +1,12 @@
+data/
+intermediates/
+intermediates2/
+intermediates3/
+unsloth_compiled_cache/
+*.png
+*.ipynb
+.vscode/
+test.py
+__pycache__/
+.env
+src/pretrain/outputs/
