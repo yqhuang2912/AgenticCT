@@ -5,31 +5,23 @@ import pandas as pd
 
 
 class DegradationDataset(Dataset):
-    def __init__(self, dataset_info_file, split='train', degradation_type="ldct", severity="low", train_ratio=0.75):
+    def __init__(self, dataset_info_file, degradation_type="ldct", severity="low"):
         dataset_info = pd.read_csv(dataset_info_file)
 
         # Filter dataset based on severity if needed
         self.dataset_info = dataset_info[dataset_info[f'{degradation_type}_severities'] == severity]
 
-        # shuffle and split the dataset
-        self.dataset_info = self.dataset_info.sample(frac=1, random_state=42).reset_index(drop=True)
-        train_size = int(len(self.dataset_info) * train_ratio)
-        if split == 'train':
-            self.data = self.dataset_info.iloc[:train_size]
-        else:
-            self.data = self.dataset_info.iloc[train_size:]
-
     def __len__(self):
-        return len(self.data)
+        return len(self.dataset_info)
 
     def __getitem__(self, idx):
-        image_path = self.data.iloc[idx]['image_paths']
-        label_path = self.data.iloc[idx]['label_paths']
-        image = np.load(image_path) # shape: [1, 1, H, W]
-        label = np.load(label_path)
-        
-        image = torch.from_numpy(image).squeeze(0).float()
-        label = torch.from_numpy(label).squeeze(0).float()
+        image_path = self.dataset_info.iloc[idx]['image_paths']
+        label_path = self.dataset_info.iloc[idx]['label_paths']
+        image = np.load(image_path, mmap_mode='r')
+        label = np.load(label_path, mmap_mode='r')
+
+        image = torch.tensor(np.asarray(image), dtype=torch.float32).squeeze(0)
+        label = torch.tensor(np.asarray(label), dtype=torch.float32).squeeze(0)
 
         return image, label
     

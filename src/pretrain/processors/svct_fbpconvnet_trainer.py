@@ -29,7 +29,6 @@ HU_DATA_RANGE = MAX_HU - MIN_HU
 
 logger = logging.getLogger(__name__)
 
-
 class Trainer:
     def __init__(self, args):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -65,8 +64,8 @@ class Trainer:
 
     def train_step(self, batch, batch_idx):
         degradated_images, clean_images = batch  # [B, 1, H, W]
-        degradated_images = degradated_images.to(self.device)
-        clean_images = clean_images.to(self.device)
+        degradated_images = degradated_images.to(self.device, non_blocking=True)
+        clean_images = clean_images.to(self.device, non_blocking=True)
 
         self.optimizer.zero_grad()
         outputs = self.model(degradated_images)
@@ -76,38 +75,35 @@ class Trainer:
         loss.backward()
         self.optimizer.step()
 
-        # 在 HU 域上计算 PSNR / SSIM
-        with torch.no_grad():
-            outputs_hu = self._to_hu(outputs)
-            clean_hu = self._to_hu(clean_images)
+        metrics = {"loss": loss.item()}
+        should_log = self.vis_every_n_step and (batch_idx % self.vis_every_n_step == 0)
 
-            psnr = peak_signal_noise_ratio(
-                preds=outputs_hu,
-                target=clean_hu,
-                data_range=HU_DATA_RANGE,
-            )
-            ssim = structural_similarity_index_measure(
-                preds=outputs_hu,
-                target=clean_hu,
-                data_range=HU_DATA_RANGE,
-            )
+        if should_log:
+            with torch.no_grad():
+                outputs_hu = self._to_hu(outputs)
+                clean_hu = self._to_hu(clean_images)
 
-        metrics = {
-            "loss": loss.item(),
-            "psnr": psnr.item(),
-            "ssim": ssim.item(),
-        }
+                psnr = peak_signal_noise_ratio(
+                    preds=outputs_hu,
+                    target=clean_hu,
+                    data_range=HU_DATA_RANGE,
+                )
+                ssim = structural_similarity_index_measure(
+                    preds=outputs_hu,
+                    target=clean_hu,
+                    data_range=HU_DATA_RANGE,
+                )
 
-        # 日志输出（控制台 / log 文件）
-        logger.info(
-            f"[Train] step={self.global_step} "
-            f"loss={metrics['loss']:.4f}, "
-            f"psnr={metrics['psnr']:.4f}, "
-            f"ssim={metrics['ssim']:.4f}"
-        )
+            metrics.update({"psnr": psnr.item(), "ssim": ssim.item()})
 
         if self.vis_every_n_step and (batch_idx % self.vis_every_n_step == 0):
             # 记录到 SwanLab
+            print(
+                f"[Train] step={self.global_step} "
+                f"loss={metrics['loss']:.4f}, "
+                f"psnr={metrics['psnr']:.4f}, "
+                f"ssim={metrics['ssim']:.4f}"
+            )
             log_metrics_to_swanlab(metrics, mode="train", step=self.global_step)
             # 可视化的时候，用 HU 域图像更直观
             degradated_hu = self._to_hu(degradated_images)
@@ -126,8 +122,8 @@ class Trainer:
 
     def validation_step(self, batch, batch_idx=0):
         degradated_images, clean_images = batch
-        degradated_images = degradated_images.to(self.device)
-        clean_images = clean_images.to(self.device)
+        degradated_images = degradated_images.to(self.device, non_blocking=True)
+        clean_images = clean_images.to(self.device, non_blocking=True)
 
         with torch.no_grad():
             outputs = self.model(degradated_images)
@@ -152,13 +148,6 @@ class Trainer:
             "val_psnr": psnr.item(),
             "val_ssim": ssim.item(),
         }
-
-        logger.info(
-            f"[Val] step={self.global_step} "
-            f"loss={metrics['val_loss']:.4f}, "
-            f"psnr={metrics['val_psnr']:.4f}, "
-            f"ssim={metrics['val_ssim']:.4f}"
-        )
 
         log_metrics_to_swanlab(metrics, mode="val", step=self.global_step)
 
@@ -206,7 +195,7 @@ class Trainer:
             avg_val_psnr = float(np.mean(val_psnrs))
             avg_val_ssim = float(np.mean(val_ssims))
 
-            logger.info(
+            print(
                 f"[Epoch {epoch+1}/{self.epochs}] "
                 f"Val Loss={avg_val_loss:.4f}, "
                 f"PSNR={avg_val_psnr:.4f}, "
@@ -265,19 +254,14 @@ class Trainer:
 
 
 def train(args):
-    # Dataset
     train_dataset = DegradationDataset(
-        dataset_info_file=args.dataset_info_file,
-        split="train",
-        train_ratio=args.train_ratio,
+        dataset_info_file=args.train_dataset_info_file,
         severity=args.severity,
         degradation_type="svct",
     )
 
     val_dataset = DegradationDataset(
-        dataset_info_file=args.dataset_info_file,
-        split="test",
-        train_ratio=args.train_ratio,
+        dataset_info_file=args.val_dataset_info_file,
         severity=args.severity,
         degradation_type="svct",
     )
@@ -306,20 +290,23 @@ def train(args):
 def main():
     parser = argparse.ArgumentParser(description="SVCT Training with SwanLab")
     parser.add_argument(
-        "--dataset_info_file",
+        "--train_dataset_info_file",
         type=str,
-        default="/data/hyq/codes/AgenticCT/data/deeplesion/svct/dataset_info.csv",
-        help="Path to the dataset info file",
+        default="/data/hyq/codes/AgenticCT/data/deeplesion/svct/train_dataset_info.csv",
+        help="Path to the train dataset info file",
     )
-    parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument(
-        "--train_ratio", type=float, default=0.75, help="Train/validation split ratio"
+        "--val_dataset_info_file",
+        type=str,
+        default="/data/hyq/codes/AgenticCT/data/deeplesion/svct/val_dataset_info.csv",
+        help="Path to the val dataset info file",
     )
+    parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument(
         "--severity", type=str, default="low", help="Severity level of the degradation"
     )
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
+    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
     parser.add_argument(
         "--num_workers", type=int, default=4, help="Number of workers for data loading"
     )
@@ -337,6 +324,7 @@ def main():
     )
 
     args = parser.parse_args()
+    torch.backends.cudnn.benchmark = True
 
     # 日志和保存路径
     args.save_dir = os.path.join(args.save_dir_root, args.severity)

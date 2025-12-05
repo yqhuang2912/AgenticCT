@@ -29,22 +29,22 @@ BASE_OPTIONS = torch.tensor([
 ], dtype=torch.float32, device='cuda')
 
 
-DEGRADATION_SEVERITY = {
-    "ldct": {
-        "high": (0.05, 0.25),  # At most 75% dose reduction, 
-        "medium": (0.25, 0.5), # At most 50% dose reduction
-        "low": (0.5, 0.75)    # At most 25% dose reduction
-    },
-    "lact": {
-        "high": (90, 120),  # 90 to 120 degrees
-        "medium": (120, 150), # 120 to 150 degrees
-        "low": (150, 180)    # 150 to 180 degrees
-    },
-    "svct": {
-        "high": (30, 120),    # 30 to 120 views
-        "medium": (120, 240), # 120 to 240 views
-        "low": (240, 360)     # 240 to 360 views
-    }
+LDCT_SEVERITY = {
+    "high": 0.2,
+    "medium": 0.4,
+    "low": 0.6
+}
+
+SVCT_SEVERITY = {
+    "high": 60,
+    "medium": 120,
+    "low": 300
+}
+
+LACT_SEVERITY = {
+    "high": 90,
+    "medium": 120,
+    "low": 150
 }
 
 PATIENT_IDS = ["L067", "L096", "L109", "L143", "L192", "L286", "L291", "L310", "L333", "L506"]
@@ -218,72 +218,72 @@ def generate_sparse_view_samples(input_image):
     views = []
     degradations = []
 
-    # single degradation
-    for _ in range(9):
-        for severity, (min_views, max_views) in DEGRADATION_SEVERITY["svct"].items():
-            n_views = random.randint(min_views, max_views)
+    # single degradation (3)
+    for severity in SVCT_SEVERITY.keys():
+        n_views = SVCT_SEVERITY[severity]
+        every_n_views = ANGLES // n_views
+        p_svct = simulate_sparse_view(p_fdct, every_n_views)
+        svct_options = create_sparse_view_geometry(every_n_views)
+        svct_reconstruction = fbp(p_svct, svct_options)
+        samples.append(svct_reconstruction)
+        labels.append(input_image)
+        ldct_severities.append(None)
+        svct_severities.append(severity)
+        lact_severities.append(None)
+        views.append(n_views)
+        degradations.append(['svct'])
+
+    # two degradations
+    # 1) ldct + svct (9)
+    for ldct_severity in LDCT_SEVERITY.keys():
+        alpha = LDCT_SEVERITY[ldct_severity]
+        p_ldct = simulate_low_dose_gaussian(p_fdct, alpha)
+        label = fbp(p_ldct, BASE_OPTIONS)
+        for svct_severity in SVCT_SEVERITY.keys():
+            n_views = SVCT_SEVERITY[svct_severity]
             every_n_views = ANGLES // n_views
-            p_svct = simulate_sparse_view(p_fdct, every_n_views)
+            p_svct = simulate_sparse_view(p_ldct, every_n_views)
             svct_options = create_sparse_view_geometry(every_n_views)
             svct_reconstruction = fbp(p_svct, svct_options)
             samples.append(svct_reconstruction)
-            labels.append(input_image)
-            svct_severities.append(severity)
+            labels.append(label)
+            ldct_severities.append(ldct_severity)
+            svct_severities.append(svct_severity)
             lact_severities.append(None)
+            views.append(n_views)
+            degradations.append(['ldct', 'svct'])
+
+    # 2) lact + svct (9)
+    for lact_severity in LACT_SEVERITY.keys():
+        end_angle_deg = LACT_SEVERITY[lact_severity]
+        p_lact = simulate_limited_angle(p_fdct, end_angle_deg)
+        lact_options = create_limited_angle_geometry(end_angle_deg)
+        label = fbp(p_lact, lact_options)
+        for svct_severity in SVCT_SEVERITY.keys():
+            n_views = SVCT_SEVERITY[svct_severity]
+            every_n_views = ANGLES // n_views
+            p_lasvct, view_interval = simulate_sparse_limited_angle(p_fdct, every_n_views, end_angle_deg)
+            lasvct_options = create_sparse_limited_angle_geometry(view_interval)
+            lasvct_reconstruction = fbp(p_lasvct, lasvct_options)
+            samples.append(lasvct_reconstruction)
+            labels.append(label)
+            lact_severities.append(lact_severity)
+            svct_severities.append(svct_severity)
             ldct_severities.append(None)
             views.append(n_views)
-            degradations.append(['svct'])
+            degradations.append(['lact', 'svct'])
 
-    # two degradations
-    for _ in range(3):
-        for ldct_severity, (min_alpha, max_alpha) in DEGRADATION_SEVERITY["ldct"].items():
-            alpha = random.uniform(min_alpha, max_alpha)
-            p_ldct = simulate_low_dose_gaussian(p_fdct, alpha)
-            label = fbp(p_ldct, BASE_OPTIONS)
-            for svct_severity, (min_views, max_views) in DEGRADATION_SEVERITY["svct"].items():
-                n_views = random.randint(min_views, max_views)
-                every_n_views = ANGLES // n_views
-                p_svct = simulate_sparse_view(p_ldct, every_n_views)
-                svct_options = create_sparse_view_geometry(every_n_views)
-                svct_reconstruction = fbp(p_svct, svct_options)
-                samples.append(svct_reconstruction)
-                labels.append(label)
-                ldct_severities.append(ldct_severity)
-                svct_severities.append(svct_severity)
-                lact_severities.append(None)
-                views.append(n_views)
-                degradations.append(['ldct', 'svct'])
-
-        for lact_severity, (min_end_angle, max_end_angle) in DEGRADATION_SEVERITY["lact"].items():
-            end_angle_deg = random.randint(min_end_angle, max_end_angle)
-            p_lact = simulate_limited_angle(p_fdct, end_angle_deg)
-            lact_options = create_limited_angle_geometry(end_angle_deg)
-            label = fbp(p_lact, lact_options)
-            for svct_severity, (min_views, max_views) in DEGRADATION_SEVERITY["svct"].items():
-                n_views = random.randint(min_views, max_views)
-                every_n_views = ANGLES // n_views
-                p_lasvct, view_interval = simulate_sparse_limited_angle(p_fdct, every_n_views, end_angle_deg)
-                lasvct_options = create_sparse_limited_angle_geometry(view_interval)
-                lasvct_reconstruction = fbp(p_lasvct, lasvct_options)
-                samples.append(lasvct_reconstruction)
-                labels.append(label)
-                lact_severities.append(lact_severity)
-                svct_severities.append(svct_severity)
-                ldct_severities.append(None)
-                views.append(n_views)
-                degradations.append(['lact', 'svct'])
-
-    # three degradations
-    for ldct_severity, (min_alpha, max_alpha) in DEGRADATION_SEVERITY["ldct"].items():
-        alpha = random.uniform(min_alpha, max_alpha)
+    # three degradations (27)
+    for ldct_severity in LDCT_SEVERITY.keys():
+        alpha = LDCT_SEVERITY[ldct_severity]
         p_ldct = simulate_low_dose_gaussian(p_fdct, alpha)
-        for lact_severity, (min_end_angle, max_end_angle) in DEGRADATION_SEVERITY["lact"].items():
-            end_angle_deg = random.randint(min_end_angle, max_end_angle)
+        for lact_severity in LACT_SEVERITY.keys():
+            end_angle_deg = LACT_SEVERITY[lact_severity]
             p_lact = simulate_limited_angle(p_ldct, end_angle_deg)
             lact_options = create_limited_angle_geometry(end_angle_deg)
             label = fbp(p_lact, lact_options)
-            for svct_severity, (min_views, max_views) in DEGRADATION_SEVERITY["svct"].items():
-                n_views = random.randint(min_views, max_views)
+            for svct_severity in SVCT_SEVERITY.keys():
+                n_views = SVCT_SEVERITY[svct_severity]
                 every_n_views = ANGLES // n_views
                 p_lasvct, view_interval = simulate_sparse_limited_angle(p_ldct, every_n_views, end_angle_deg)
                 lasvct_options = create_sparse_limited_angle_geometry(view_interval)
@@ -316,74 +316,72 @@ def generate_limited_angle_samples(input_image):
     end_angles = []
     degradations = []
 
-    # single degradation
-    for _ in range(9):
-        for severity, (min_end_angle, max_end_angle) in DEGRADATION_SEVERITY["lact"].items():
-            end_angle_deg = random.randint(min_end_angle, max_end_angle)
-            p_lact = simulate_limited_angle(p_fdct, end_angle_deg)
+    # single degradation (3)
+    for severity in LACT_SEVERITY.keys():
+        end_angle_deg = LACT_SEVERITY[severity]
+        p_lact = simulate_limited_angle(p_fdct, end_angle_deg)
+        lact_options = create_limited_angle_geometry(end_angle_deg)
+        lact_reconstruction = fbp(p_lact, lact_options)
+        samples.append(lact_reconstruction)
+        labels.append(input_image)
+        lact_severities.append(severity)
+        svct_severities.append(None)
+        ldct_severities.append(None)
+        end_angles.append(end_angle_deg)
+        degradations.append(['lact'])
+    
+    # two degradations
+    # ldct + lact (9)
+    for ldct_severity in LDCT_SEVERITY.keys():
+        alpha = LDCT_SEVERITY[ldct_severity]
+        p_ldct = simulate_low_dose_gaussian(p_fdct, alpha)
+        label = fbp(p_ldct, BASE_OPTIONS)
+        for lact_severity in LACT_SEVERITY.keys():
+            end_angle_deg = LACT_SEVERITY[lact_severity]
+            p_lact = simulate_limited_angle(p_ldct, end_angle_deg)
             lact_options = create_limited_angle_geometry(end_angle_deg)
             lact_reconstruction = fbp(p_lact, lact_options)
             samples.append(lact_reconstruction)
-            labels.append(input_image)
-            lact_severities.append(severity)
+            labels.append(label)
+            ldct_severities.append(ldct_severity)
+            lact_severities.append(lact_severity)
             svct_severities.append(None)
+            end_angles.append(end_angle_deg)
+            degradations.append(['ldct', 'lact'])
+
+    # lact + svct (9)
+    for lact_severity in LACT_SEVERITY.keys():
+        end_angle_deg = LACT_SEVERITY[lact_severity]
+        for svct_severity in SVCT_SEVERITY.keys():
+            n_views = SVCT_SEVERITY[svct_severity]
+            every_n_views = ANGLES // n_views
+
+            p_lasvct, view_interval = simulate_sparse_limited_angle(
+                p_fdct, every_n_views, end_angle_deg
+            )
+            lasvct_options = create_sparse_limited_angle_geometry(view_interval)
+            lasvct_reconstruction = fbp(p_lasvct, lasvct_options)
+            samples.append(lasvct_reconstruction)
+
+            p_svct = simulate_sparse_view(p_fdct, every_n_views)
+            svct_options = create_sparse_view_geometry(every_n_views)
+            label = fbp(p_svct, svct_options)
+            labels.append(label)
+
+            lact_severities.append(lact_severity)
+            svct_severities.append(svct_severity)
             ldct_severities.append(None)
             end_angles.append(end_angle_deg)
-            degradations.append(['lact'])
-    
-    # two degradations
-    for _ in range(3):
-        for ldct_severity, (min_alpha, max_alpha) in DEGRADATION_SEVERITY["ldct"].items():
-            alpha = random.uniform(min_alpha, max_alpha)
-            p_ldct = simulate_low_dose_gaussian(p_fdct, alpha)
-            label = fbp(p_ldct, BASE_OPTIONS)
-            for lact_severity, (min_end_angle, max_end_angle) in DEGRADATION_SEVERITY["lact"].items():
-                end_angle_deg = random.randint(min_end_angle, max_end_angle)
-                p_lact = simulate_limited_angle(p_ldct, end_angle_deg)
-                lact_options = create_limited_angle_geometry(end_angle_deg)
-                lact_reconstruction = fbp(p_lact, lact_options)
-                samples.append(lact_reconstruction)
-                labels.append(label)
-                ldct_severities.append(ldct_severity)
-                lact_severities.append(lact_severity)
-                svct_severities.append(None)
-                end_angles.append(end_angle_deg)
-                degradations.append(['ldct', 'lact'])
-        
-        for lact_severity, (min_end_angle, max_end_angle) in DEGRADATION_SEVERITY["lact"].items():
-            end_angle_deg = random.randint(min_end_angle, max_end_angle)
-            for svct_severity, (min_views, max_views) in DEGRADATION_SEVERITY["svct"].items():
-                n_views = random.randint(min_views, max_views)
-                every_n_views = ANGLES // n_views
+            degradations.append(['lact', 'svct'])
 
-                # sample：LACT + SVCT（有限角 + 稀疏视角）
-                p_lasvct, view_interval = simulate_sparse_limited_angle(
-                    p_fdct, every_n_views, end_angle_deg
-                )
-                lasvct_options = create_sparse_limited_angle_geometry(view_interval)
-                lasvct_reconstruction = fbp(p_lasvct, lasvct_options)
-                samples.append(lasvct_reconstruction)
-
-                # label：只保留 SVCT（全角度、但稀疏视角）
-                p_svct = simulate_sparse_view(p_fdct, every_n_views)        # ★ 不再 limited_angle
-                svct_options = create_sparse_view_geometry(every_n_views)   # ★ 用 sparse_view 的几何
-                label = fbp(p_svct, svct_options)
-                labels.append(label)
-
-                lact_severities.append(lact_severity)
-                svct_severities.append(svct_severity)
-                ldct_severities.append(None)
-                end_angles.append(end_angle_deg)
-                degradations.append(['lact', 'svct'])
-
-    # three degradations
-    for ldct_severity, (min_alpha, max_alpha) in DEGRADATION_SEVERITY["ldct"].items():
-        alpha = random.uniform(min_alpha, max_alpha)
+    # three degradations (27)
+    for ldct_severity in LDCT_SEVERITY.keys():
+        alpha = LDCT_SEVERITY[ldct_severity]
         p_ldct = simulate_low_dose_gaussian(p_fdct, alpha)
-        for lact_severity, (min_end_angle, max_end_angle) in DEGRADATION_SEVERITY["lact"].items():
-            end_angle_deg = random.randint(min_end_angle, max_end_angle)
-            for svct_severity, (min_views, max_views) in DEGRADATION_SEVERITY["svct"].items():
-                n_views = random.randint(min_views, max_views)
+        for lact_severity in LACT_SEVERITY.keys():
+            end_angle_deg = LACT_SEVERITY[lact_severity]
+            for svct_severity in SVCT_SEVERITY.keys():
+                n_views = SVCT_SEVERITY[svct_severity]
                 every_n_views = ANGLES // n_views
                 p_lasvct, view_interval = simulate_sparse_limited_angle(p_ldct, every_n_views, end_angle_deg)
                 lasvct_options = create_sparse_limited_angle_geometry(view_interval)
@@ -421,74 +419,73 @@ def generate_low_dose_samples(input_image):
     alphas = []
     degradations = []
 
-    # single degradation (3个)
-    for _ in range(9):
-        for severity, (min_alpha, max_alpha) in DEGRADATION_SEVERITY["ldct"].items():
-            alpha = random.uniform(min_alpha, max_alpha)
-            p_ldct = simulate_low_dose_gaussian(p_fdct, alpha)
-            ldct_reconstruction = fbp(p_ldct, BASE_OPTIONS)
-            samples.append(ldct_reconstruction)
-            labels.append(input_image)
-            ldct_severities.append(severity)
-            svct_severities.append(None)
+    # single degradation (3)
+    for severity in LDCT_SEVERITY.keys():
+        alpha = LDCT_SEVERITY[severity]
+        p_ldct = simulate_low_dose_gaussian(p_fdct, alpha)
+        ldct_reconstruction = fbp(p_ldct, BASE_OPTIONS)
+        samples.append(ldct_reconstruction)
+        labels.append(input_image)
+        ldct_severities.append(severity)
+        svct_severities.append(None)
+        lact_severities.append(None)
+        alphas.append(alpha)
+        degradations.append(['ldct'])
+
+    # two degradations
+    # ldct + svct (9)
+    for ldct_severity in LDCT_SEVERITY.keys():
+        alpha = LDCT_SEVERITY[ldct_severity]
+        p_ldct = simulate_low_dose_gaussian(p_fdct, alpha)
+        for svct_severity in SVCT_SEVERITY.keys():
+            n_views = SVCT_SEVERITY[svct_severity]
+            every_n_views = ANGLES // n_views
+            p_svct = simulate_sparse_view(p_ldct, every_n_views)
+            svct_options = create_sparse_view_geometry(every_n_views)
+            svct_reconstruction = fbp(p_svct, svct_options)
+            samples.append(svct_reconstruction)
+
+            p_label_svct = simulate_sparse_view(p_fdct, every_n_views)
+            label_svct_options = create_sparse_view_geometry(every_n_views)
+            label = fbp(p_label_svct, label_svct_options)
+            labels.append(label)
+
+            ldct_severities.append(ldct_severity)
+            svct_severities.append(svct_severity)
             lact_severities.append(None)
             alphas.append(alpha)
-            degradations.append(['ldct'])
+            degradations.append(['ldct', 'svct'])
 
-    # two degradations (9个)
-    for _ in range(3):
-        for ldct_severity, (min_alpha, max_alpha) in DEGRADATION_SEVERITY["ldct"].items():
-            alpha = random.uniform(min_alpha, max_alpha)
-            p_ldct = simulate_low_dose_gaussian(p_fdct, alpha)
-            for svct_severity, (min_views, max_views) in DEGRADATION_SEVERITY["svct"].items():
-                n_views = random.randint(min_views, max_views)
-                every_n_views = ANGLES // n_views
-                p_svct = simulate_sparse_view(p_ldct, every_n_views)
-                svct_options = create_sparse_view_geometry(every_n_views)
-                svct_reconstruction = fbp(p_svct, svct_options)
-                samples.append(svct_reconstruction)
-
-                p_label_svct = simulate_sparse_view(p_fdct, every_n_views)
-                label_svct_options = create_sparse_view_geometry(every_n_views)
-                label = fbp(p_label_svct, label_svct_options)
-                labels.append(label)
-
-                ldct_severities.append(ldct_severity)
-                svct_severities.append(svct_severity)
-                lact_severities.append(None)
-                alphas.append(alpha)
-                degradations.append(['ldct', 'svct'])
-
-        # two degradations (9个)
-        for ldct_severity, (min_alpha, max_alpha) in DEGRADATION_SEVERITY["ldct"].items():
-            alpha = random.uniform(min_alpha, max_alpha)
-            p_ldct = simulate_low_dose_gaussian(p_fdct, alpha)
-            for lact_severity, (min_end_angle, max_end_angle) in DEGRADATION_SEVERITY["lact"].items():
-                end_angle_deg = random.randint(min_end_angle, max_end_angle)
-                p_lact = simulate_limited_angle(p_ldct, end_angle_deg)
-                lact_options = create_limited_angle_geometry(end_angle_deg)
-                lact_reconstruction = fbp(p_lact, lact_options)
-                samples.append(lact_reconstruction)
-
-                p_label_lact = simulate_limited_angle(p_fdct, end_angle_deg)
-                label_lact_options = create_limited_angle_geometry(end_angle_deg)
-                label = fbp(p_label_lact, label_lact_options)
-                labels.append(label)
-
-                ldct_severities.append(ldct_severity)
-                lact_severities.append(lact_severity)
-                svct_severities.append(None)
-                alphas.append(alpha)
-                degradations.append(['ldct', 'lact'])
-
-    # three degradations (27个)
-    for ldct_severity, (min_alpha, max_alpha) in DEGRADATION_SEVERITY["ldct"].items():
-        alpha = random.uniform(min_alpha, max_alpha)
+    # ldct + lact (9)
+    for ldct_severity in LDCT_SEVERITY.keys():
+        alpha = LDCT_SEVERITY[ldct_severity]
         p_ldct = simulate_low_dose_gaussian(p_fdct, alpha)
-        for lact_severity, (min_end_angle, max_end_angle) in DEGRADATION_SEVERITY["lact"].items():
-            end_angle_deg = random.randint(min_end_angle, max_end_angle)
-            for svct_severity, (min_views, max_views) in DEGRADATION_SEVERITY["svct"].items():
-                n_views = random.randint(min_views, max_views)
+        for lact_severity in LACT_SEVERITY.keys():
+            end_angle_deg = LACT_SEVERITY[lact_severity]
+            p_lact = simulate_limited_angle(p_ldct, end_angle_deg)
+            lact_options = create_limited_angle_geometry(end_angle_deg)
+            lact_reconstruction = fbp(p_lact, lact_options)
+            samples.append(lact_reconstruction)
+
+            p_label_lact = simulate_limited_angle(p_fdct, end_angle_deg)
+            label_lact_options = create_limited_angle_geometry(end_angle_deg)
+            label = fbp(p_label_lact, label_lact_options)
+            labels.append(label)
+
+            ldct_severities.append(ldct_severity)
+            lact_severities.append(lact_severity)
+            svct_severities.append(None)
+            alphas.append(alpha)
+            degradations.append(['ldct', 'lact'])
+
+    # three degradations (27)
+    for ldct_severity in LDCT_SEVERITY.keys():
+        alpha = LDCT_SEVERITY[ldct_severity]
+        p_ldct = simulate_low_dose_gaussian(p_fdct, alpha)
+        for lact_severity in LACT_SEVERITY.keys():
+            end_angle_deg = LACT_SEVERITY[lact_severity]
+            for svct_severity in SVCT_SEVERITY.keys():
+                n_views = SVCT_SEVERITY[svct_severity]
                 every_n_views = ANGLES // n_views
                 p_lasvct, view_interval = simulate_sparse_limited_angle(p_ldct, every_n_views, end_angle_deg)
                 lasvct_options = create_sparse_limited_angle_geometry(view_interval)
@@ -518,12 +515,13 @@ def main():
     parser.add_argument("--slice_thickness", type=str, choices=["1mm", "3mm"], default="3mm", help="Slice thickness in mm")
     parser.add_argument("--exclude_patient_ids", type=str, choices=PATIENT_IDS, default=[], help="Patient IDs to exclude from the dataset")
     parser.add_argument("--degradation_type", type=str, choices=["ldct", "lact", "svct"], required=True, help="Type of degradation to simulate")
+    parser.add_argument("--split_seed", type=int, default=42, help="Random seed for 8:1:1 split")
 
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    dataset_info = {
+    train_dataset_info = {
         "image_paths": [],
         "label_paths": [],
         "window_centers": [],
@@ -537,32 +535,68 @@ def main():
         "degradations": []
     }
 
+    val_dataset_info = {
+        "image_paths": [],
+        "label_paths": [],
+        "window_centers": [],
+        "window_widths": [],
+        "ldct_severities": [],
+        "lact_severities": [],
+        "svct_severities": [],
+        "alphas": [],
+        "views": [],
+        "end_angles": [],
+        "degradations": []
+    }
+
+    test_dataset_info = {
+        "image_paths": [],
+        "label_paths": [],
+        "window_centers": [],
+        "window_widths": [],
+        "ldct_severities": [],
+        "lact_severities": [],
+        "svct_severities": [],
+        "alphas": [],
+        "views": [],
+        "end_angles": [],
+        "degradations": []
+    }
+
+    all_targets = []
     for pid in PATIENT_IDS:
         if pid in args.exclude_patient_ids:
-            print(f"Excluding patient ID: {pid}")
             continue
         base_dir = os.path.join(args.target_image_dir, pid, f"full_{args.slice_thickness}")
-        output_patient_dir = os.path.join(args.output_dir, pid, f"full_{args.slice_thickness}")
-        os.makedirs(output_patient_dir, exist_ok=True)
         if not os.path.exists(base_dir):
-            print(f"Directory does not exist: {base_dir}, skipping...")
             continue
-        for target_image_path in tqdm(glob.glob(os.path.join(base_dir, "*.IMA")), desc=f"Processing patient {pid}"):
+        paths = sorted(glob.glob(os.path.join(base_dir, "*.IMA")))
+        for p in paths:
+            all_targets.append((pid, p))
+
+    rng = random.Random(args.split_seed)
+    rng.shuffle(all_targets)
+    N = len(all_targets)
+    n_train = int(N * 0.8)
+    n_val = int(N * 0.1)
+    train_list = all_targets[:n_train]
+    val_list = all_targets[n_train:n_train + n_val]
+    test_list = all_targets[n_train + n_val:]
+
+    def process_entries(entries, dataset_info, desc):
+        for pid, target_image_path in tqdm(entries, desc=desc):
+            output_patient_dir = os.path.join(args.output_dir, pid, f"full_{args.slice_thickness}")
+            os.makedirs(output_patient_dir, exist_ok=True)
             target_image, window_center, window_width = load_dicom_image(target_image_path)
             target_image = resize_image(target_image, (args.image_size, args.image_size))
             target_image = normalize_image(target_image, args.min_hu, args.max_hu)
-            target_image = torch.tensor(target_image, dtype=torch.float32, device='cuda').unsqueeze(0).unsqueeze(0)  # [1, 1, H, W]
-            
+            target_image = torch.tensor(target_image, dtype=torch.float32, device='cuda').unsqueeze(0).unsqueeze(0)
             if args.degradation_type == "ldct":
                 samples, labels, ldct_severities, lact_severities, svct_severities, alphas, degradations = generate_low_dose_samples(target_image)
-
             elif args.degradation_type == "lact":
                 samples, labels, ldct_severities, lact_severities, svct_severities, end_angles, degradations = generate_limited_angle_samples(target_image)
-
             elif args.degradation_type == "svct":
                 samples, labels, ldct_severities, lact_severities, svct_severities, views, degradations = generate_sparse_view_samples(target_image)
-
-            # Save the simulated sinograms and reconstructions
             for i, sample in enumerate(samples):
                 base_filename = os.path.splitext(os.path.basename(target_image_path))[0]
                 sample_path = os.path.join(output_patient_dir, f"{base_filename}_sample_{i}.npy")
@@ -577,7 +611,6 @@ def main():
                 dataset_info["lact_severities"].append(lact_severities[i])
                 dataset_info["svct_severities"].append(svct_severities[i])
                 dataset_info["degradations"].append(degradations[i])
-            
             if args.degradation_type == "ldct":
                 dataset_info["alphas"].extend(alphas)
                 dataset_info["views"].extend([None] * len(alphas))
@@ -590,10 +623,20 @@ def main():
                 dataset_info["views"].extend(views)
                 dataset_info["alphas"].extend([None] * len(views))
                 dataset_info["end_angles"].extend([None] * len(views))
-    # Save dataset info
-    info_path = os.path.join(args.output_dir, "dataset_info.csv")
-    pd.DataFrame(dataset_info).to_csv(info_path, index=False)
-    print(f"Dataset info saved to {info_path}")
+
+    process_entries(train_list, train_dataset_info, "Processing train")
+    process_entries(val_list, val_dataset_info, "Processing val")
+    process_entries(test_list, test_dataset_info, "Processing test")
+
+    train_info_path = os.path.join(args.output_dir, "train_dataset_info.csv")
+    pd.DataFrame(train_dataset_info).to_csv(train_info_path, index=False)
+    print(f"Train dataset info saved to {train_info_path}")
+    val_info_path = os.path.join(args.output_dir, "val_dataset_info.csv")
+    pd.DataFrame(val_dataset_info).to_csv(val_info_path, index=False)
+    print(f"Val dataset info saved to {val_info_path}")
+    test_info_path = os.path.join(args.output_dir, "test_dataset_info.csv")
+    pd.DataFrame(test_dataset_info).to_csv(test_info_path, index=False)
+    print(f"Test dataset info saved to {test_info_path}")
 
 if __name__ == "__main__":
     # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
@@ -769,6 +812,4 @@ if __name__ == "__main__":
 
     # plt.tight_layout()
     # plt.savefig('low_dose_simulation.png', dpi=300)
-
-
 

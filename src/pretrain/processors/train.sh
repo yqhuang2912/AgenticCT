@@ -14,8 +14,8 @@ export MPLCONFIGDIR=/data/hyq/matplotlib_cache
 
 # /data/hyq/envs/miniconda3/envs/py312_torch271_cu128/bin/python ldct_redcnn_trainer.py --severity high
 # /data/hyq/envs/miniconda3/envs/py312_torch271_cu128/bin/python ldct_redcnn_trainer.py --severity medium
-# /data/hyq/envs/miniconda3/envs/py312_torch271_cu128/bin/python ldct_redcnn_trainer.py --severity low
+/data/hyq/envs/miniconda3/envs/py312_torch271_cu128/bin/python ldct_redcnn_trainer.py --severity low
 
 # /data/hyq/envs/miniconda3/envs/py312_torch271_cu128/bin/python svct_fbpconvnet_trainer.py --severity high
-/data/hyq/envs/miniconda3/envs/py312_torch271_cu128/bin/python svct_fbpconvnet_trainer.py --severity medium
+# /data/hyq/envs/miniconda3/envs/py312_torch271_cu128/bin/python svct_fbpconvnet_trainer.py --severity medium
 # /data/hyq/envs/miniconda3/envs/py312_torch271_cu128/bin/python svct_fbpconvnet_trainer.py --severity low

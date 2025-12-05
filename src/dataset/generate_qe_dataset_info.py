@@ -139,23 +139,59 @@ def main():
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Generate QE Dataset Info")
     
-    parser.add_argument("--raw_dataset_info_files", type=str, nargs="+", 
-                        default=[
-                            "/data/hyq/codes/AgenticCT/data/deeplesion/ldct/dataset_info.csv",
-                            "/data/hyq/codes/AgenticCT/data/deeplesion/lact/dataset_info.csv",
-                            "/data/hyq/codes/AgenticCT/data/deeplesion/svct/dataset_info.csv",
-                        ],
-                        help="Raw dataset_info.csv files (ldct/lact/svct) for preprocessing")
-    parser.add_argument("--qe_dataset_info_out", type=str, default="/data/hyq/codes/AgenticCT/data/qe/deeplesion/dataset_info_qe.csv",
-                        help="Output QE dataset_info.csv path after preprocessing")
+    parser.add_argument("--dataset", type=str, choices=["deeplesion", "mayo"], default="deeplesion",
+                        help="选择要处理的数据集: deeplesion 或 mayo")
+    parser.add_argument("--raw_dataset_info_root", type=str, default="/data/hyq/codes/AgenticCT/data",
+                        help="原始dataset_info所在根目录，脚本将按数据集、退化类型及数据划分自动拼接")
+    parser.add_argument("--split", type=str, choices=["train", "val", "test", "all"], default="all",
+                        help="选择处理的数据划分: train/val/test 或 all(三者合并)")
+    parser.add_argument("--qe_dataset_info_out", type=str, default=None,
+                        help="输出QE的dataset_info.csv路径；未设置时按数据集和划分默认路径生成")
     parser.add_argument("--dedup_clean", action="store_true", help="Deduplicate clean(label_paths) when preprocessing")
     parser.add_argument("--max_clean", type=int, default=None, help="Max clean samples appended (default: all)")
 
     args = parser.parse_args()
     
+    dataset = args.dataset
+    root = args.raw_dataset_info_root.rstrip("/")
+    split = args.split
+
+    def split_paths(s):
+        base = f"{root}/{dataset}"
+        if s == "all":
+            return [
+                f"{base}/ldct/train_dataset_info.csv",
+                f"{base}/lact/train_dataset_info.csv",
+                f"{base}/svct/train_dataset_info.csv",
+                f"{base}/ldct/val_dataset_info.csv",
+                f"{base}/lact/val_dataset_info.csv",
+                f"{base}/svct/val_dataset_info.csv",
+                f"{base}/ldct/test_dataset_info.csv",
+                f"{base}/lact/test_dataset_info.csv",
+                f"{base}/svct/test_dataset_info.csv",
+            ]
+        else:
+            return [
+                f"{base}/ldct/{s}_dataset_info.csv",
+                f"{base}/lact/{s}_dataset_info.csv",
+                f"{base}/svct/{s}_dataset_info.csv",
+            ]
+
+    raw_csvs = split_paths(split)
+
+    if args.qe_dataset_info_out is None:
+        if split == "all":
+            out_csv = f"{root}/qe/{dataset}/dataset_info_qe.csv"
+        else:
+            out_csv = f"{root}/qe/{dataset}/{split}/dataset_info_qe.csv"
+    else:
+        out_csv = args.qe_dataset_info_out
+
+    os.makedirs(os.path.dirname(out_csv), exist_ok=True)
+
     build_qe_dataset_info(
-        raw_csvs=args.raw_dataset_info_files,
-        out_csv=args.qe_dataset_info_out,
+        raw_csvs=raw_csvs,
+        out_csv=out_csv,
         dedup_clean=args.dedup_clean,
         max_clean=args.max_clean,
     )
